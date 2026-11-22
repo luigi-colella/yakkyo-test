@@ -10,6 +10,16 @@
       "@crawler/source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./contracts": {
+      "@crawler/source": "./src/contracts.ts",
+      "types": "./dist/contracts.d.ts",
+      "default": "./dist/contracts.js"
+    },
+    "./url": {
+      "@crawler/source": "./src/url.ts",
+      "types": "./dist/url.d.ts",
+      "default": "./dist/url.js"
     }
   },
   "scripts": {
@@ -21,6 +31,11 @@
   },
   "peerDependencies": {
     "mongoose": "^9.12.3"
+  },
+  "peerDependenciesMeta": {
+    "mongoose": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "mongodb-memory-server": "^11.4.0",

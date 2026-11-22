@@ -1,4 +1,5 @@
 import eslint from '@eslint/js';
+import vue from 'eslint-plugin-vue';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
@@ -13,10 +14,29 @@ export default tseslint.config(
   },
   ...tseslint.configs.recommendedTypeChecked.map((config) => ({
     ...config,
-    files: ['**/*.ts'],
+    files: ['**/*.{ts,vue}'],
   })),
+  // Vue single-file components: template rules, `<script lang="ts">` parsed by typescript-eslint.
+  ...vue.configs['flat/recommended'],
   {
-    files: ['**/*.ts'],
+    files: ['**/*.vue'],
+    languageOptions: {
+      parserOptions: {
+        parser: tseslint.parser,
+        extraFileExtensions: ['.vue'],
+      },
+    },
+    // Template layout belongs to Prettier.
+    rules: {
+      'vue/html-indent': 'off',
+      'vue/html-self-closing': 'off',
+      'vue/max-attributes-per-line': 'off',
+      'vue/multiline-html-element-content-newline': 'off',
+      'vue/singleline-html-element-content-newline': 'off',
+    },
+  },
+  {
+    files: ['**/*.{ts,vue}'],
     languageOptions: {
       parserOptions: {
         projectService: true,

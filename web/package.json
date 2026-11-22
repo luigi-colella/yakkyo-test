@@ -2,5 +2,25 @@
   "name": "@crawler/web",
   "version": "1.0.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "scripts": {
+    "build": "vue-tsc --noEmit && vite build",
+    "dev": "vite",
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "@crawler/shared": "workspace:*",
+    "dompurify": "^3.4.18",
+    "marked": "^18.2.1",
+    "vue": "^3.5.46"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.11",
+    "@vue/compiler-dom": "^3.5.46",
+    "@vue/test-utils": "^2.6.0",
+    "jsdom": "^29.1.1",
+    "typescript": "~5.9.3",
+    "vite": "^7.3.8",
+    "vue-tsc": "^3.3.14"
+  }
 }

@@ -61,7 +61,9 @@ export function createApp({
     }),
   );
   // Helmet's default CSP already allows `img-src 'self' data:`, which the screenshot needs.
-  app.use(helmet());
+  // `upgrade-insecure-requests` is dropped: the API serves plain HTTP, and the directive would
+  // make browsers fetch the frontend's assets over HTTPS from any host other than localhost.
+  app.use(helmet({ contentSecurityPolicy: { directives: { upgradeInsecureRequests: null } } }));
   app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
   app.get('/healthz', async (_req, res) => {

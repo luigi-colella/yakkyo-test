@@ -39,6 +39,8 @@ The Express app is built by a factory that receives its dependencies (crawl serv
 
 Each request gets an id, taken from `X-Request-Id` when it is short and log-safe or generated otherwise, echoed in the response and attached to every log line (pino, JSON). The rate limit (by default 10 requests per minute per IP, in memory) applies to `POST /crawl` only, so polling never consumes it. `trust proxy` is off because the API is exposed directly: honoring `X-Forwarded-For` would let any client pick its own rate-limit key. `GET /healthz` pings MongoDB (2-second timeout) and checks that the RabbitMQ connection is open; any other `GET` that accepts HTML falls back to the frontend's `index.html`.
 
+Responses carry helmet's default security headers (CSP, `nosniff`, frame protection…) with one change: the CSP drops `upgrade-insecure-requests`. The API serves plain HTTP on port 8080, and the directive makes browsers request the frontend's scripts and styles over HTTPS from any host other than `localhost`, leaving a blank page. It protects nothing here: every asset is same-origin and relative, and the screenshot is a data URI. HTTPS, if ever added in front of the API, is enforced by HSTS, which helmet already sends.
+
 ## Time budget
 
 Each crawl has a single **30-second budget measured from the request time** (`requestedAt` in the queue message). It covers waiting in the queue, the robots check, navigation, screenshot, OpenAI analysis, persistence and any retry; a retry is scheduled only if it still fits in the remaining budget. The frontend polls with exponential backoff within the same 30 seconds, so the UI and the worker never disagree about when a job is over.
@@ -76,6 +78,16 @@ Every failure ends up as a `CrawlFailure` with a stable code (stored as the page
 ## Design analysis (OpenAI)
 
 The screenshot is sent inline (base64 data URI) to the Responses API with the specification's prompt, verbatim. The default model is `gpt-5-mini` (vision-capable and fast) with `reasoning.effort: minimal` and at most 1,000 output tokens, so the call fits in the 30-second budget; `OPENAI_MODEL` overrides it. Requests are not stored (`store: false`) and the SDK's own retries are off: transient failures are retried through the queue like any other step, so there is a single retry policy. `OPENAI_MOCK=1` replaces the client with a deterministic description for local runs and end-to-end tests. The SDK is pinned to the 6.x line because 7.x requires Node 22, while the Playwright image runs Node 20.
+
+## Frontend
+
+A single Vue 3 page driven by a small state machine (`idle → submitting → polling → success | error`) kept in a composable that receives the API functions, the poller and the clock, so it is tested without a browser. While a crawl runs, a full-screen loader blocks the page; a new submission or leaving the page aborts the running one, and its late answers are ignored. "Riprova" submits the same URL again: an unfinished job is picked up again thanks to the API's idempotency.
+
+Polling uses **absolute offsets** from the moment the user submitted (2, 4, 8, 16 s, then a final check at 27 s), so a slow request never shifts the schedule, and gives up at 30 s, the same budget the worker has. Each status request is bounded (3 s, never past the 30 s mark); network errors and 5xx answers are just retried at the next offset, while a 404 or an unexpected body ends the crawl with an error.
+
+The API and the worker report failures as stable codes; the frontend alone turns them into readable text (in Italian, the product language of the page). The design description is Markdown written by a model that looked at a third-party page, so it is untrusted: it is rendered with `marked` and always sanitized with DOMPurify before reaching the DOM (no scripts, event handlers, `javascript:` links, images or forms). The screenshot is only accepted as an inline JPEG data URI.
+
+URL validation reuses `normalizeUrl()` from `shared` (subpath `@crawler/shared/url`), and the response types come from `@crawler/shared/contracts` as type-only imports, so the client can never accept a URL the API rejects and the bundle contains no server code. Vite resolves `shared` through the same `@crawler/source` condition as the other dev tools, so `yarn build-frontend` does not need a build of `shared`. The built files are copied into `api/public`, served by the API with a SPA fallback.
 
 ## Failure modes _(to be completed)_
 

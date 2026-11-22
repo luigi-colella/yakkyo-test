@@ -390,6 +390,28 @@ describe('security headers', () => {
     expect(res.headers['content-security-policy']).toContain("img-src 'self' data:");
     expect(res.headers['x-powered-by']).toBeUndefined();
   });
+
+  it('keeps the default CSP without upgrade-insecure-requests, since the API serves plain HTTP', async () => {
+    const { app } = setup();
+
+    const res = await request(app).get('/healthz');
+    const csp = res.headers['content-security-policy'];
+
+    expect(csp).not.toContain('upgrade-insecure-requests');
+    for (const directive of [
+      "default-src 'self'",
+      "script-src 'self'",
+      "script-src-attr 'none'",
+      "object-src 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+      "frame-ancestors 'self'",
+    ]) {
+      expect(csp).toContain(directive);
+    }
+    expect(res.headers['x-content-type-options']).toBe('nosniff');
+    expect(res.headers['x-frame-options']).toBe('SAMEORIGIN');
+  });
 });
 
 describe('static frontend', () => {
