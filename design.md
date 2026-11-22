@@ -14,9 +14,28 @@ The API and the worker share one `normalizeUrl()`: only absolute `http`/`https` 
 
 URLs carrying credentials (`https://user:pass@host`) are rejected as `invalid_url`: the secret would otherwise be stored in MongoDB, written to logs and queue messages, and would let the crawler bypass basic auth, which must end in `auth_required`.
 
+## Idempotency and cache
+
+`POST /crawl` resolves a request to a job keyed by the normalized URL, in this order:
+
+1. **Cache:** a `done` job completed less than 60 seconds ago (`completedAt`, strict bound) is returned as-is: same uid, nothing published, no new screenshot.
+2. **Stale jobs:** `pending` jobs created 5 minutes ago or earlier are marked `error: stale_job`. With a 30-second budget per job they can only be left behind by a crash.
+3. **Running job:** a remaining `pending` job is reused.
+4. **New job:** a `pending` placeholder is inserted and the message is published with publisher confirms.
+
+Concurrent requests are settled by MongoDB, not by the application: a partial unique index allows one `pending` document per URL, so the losing inserts fail with a duplicate key and their next lookup returns the winner's uid. If the publish fails (or is not confirmed within 5 seconds) the new job is marked `error: queue_unavailable` and the client gets a 503, so the next request starts over instead of waiting on a job no worker will ever see.
+
+_Trade-off:_ the checks are separate queries rather than one transaction. The unique index keeps the important invariant (one running crawl per URL) under any interleaving; the remaining races, such as a job completing between the cache lookup and the insert, cost at most one extra crawl.
+
 ## Queue topology and retries
 
 `crawl` (direct) routes `crawl.requests` to the queue of the same name. The queue dead-letters rejected messages to `crawl.dlx`, which routes them to `crawl.retry`: a queue with a 2-second message TTL whose own dead-letter target is `crawl` / `crawl.requests`. A transient failure is therefore retried by a plain `nack` without requeue, with no timers in the worker, and the retry count comes from the `x-death` header RabbitMQ maintains. After two retries, or on a permanent failure, the worker publishes the message to `crawl.dlx` with routing key `crawl.dead`, and the page is marked `error`. Both services declare the same topology at startup (declarations are idempotent), so start order does not matter.
+
+## HTTP API
+
+The Express app is built by a factory that receives its dependencies (crawl service, health check, logger, frontend directory), so the HTTP layer is tested with supertest and fakes, without MongoDB or RabbitMQ. Domain errors become stable codes in one error handler: URL validation → 400 `invalid_url` / `unsupported_scheme`, MongoDB or RabbitMQ failures → 503 `storage_unavailable` / `queue_unavailable`, anything else → 500 `internal_error` with the details only in the logs. Every `POST /crawl` body that cannot yield a URL (malformed JSON, a body over 16 kB, a missing or non-string `url`) answers `invalid_url`, to stay within the 400 codes of the contract; the actual cause is logged. A malformed uid on `GET /crawl/:uid` is a 404 without a database query.
+
+Each request gets an id, taken from `X-Request-Id` when it is short and log-safe or generated otherwise, echoed in the response and attached to every log line (pino, JSON). The rate limit (by default 10 requests per minute per IP, in memory) applies to `POST /crawl` only, so polling never consumes it. `trust proxy` is off because the API is exposed directly: honoring `X-Forwarded-For` would let any client pick its own rate-limit key. `GET /healthz` pings MongoDB (2-second timeout) and checks that the RabbitMQ connection is open; any other `GET` that accepts HTML falls back to the frontend's `index.html`.
 
 ## Time budget
 
@@ -35,3 +54,7 @@ _Trade-off:_ storing an image and updating the page are two operations. The work
 The worker opens user-supplied URLs from inside the Docker network, where MongoDB, RabbitMQ and possibly cloud metadata endpoints are reachable. Every hostname is resolved and rejected if any address is not public unicast. Chromium reaches the internet only through a per-job HTTP CONNECT proxy that connects to the already-validated IP address, which closes the DNS-rebinding gap between validation and connection while keeping the original hostname for TLS verification. Every request the page makes (redirects and sub-resources included) is validated again.
 
 ## Failure modes _(to be completed)_
+
+- **MongoDB unreachable:** the API keeps running and the driver reconnects on its own; meanwhile requests answer 503 `storage_unavailable` and `/healthz` answers 503.
+- **RabbitMQ connection lost:** nothing can be published any more, so the API shuts down with exit code 1 and Docker Compose restarts it; at startup both services are retried with exponential backoff (about 30 seconds in total) before giving up.
+- **Publish not confirmed:** the new job is marked `error: queue_unavailable` and the client gets a 503 (see above).
