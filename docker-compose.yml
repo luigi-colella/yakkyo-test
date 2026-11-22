@@ -1,0 +1,63 @@
+# Prerequisites: `cp .env.example .env` and `yarn build-frontend`. Then `docker compose up --build`.
+# The API and the worker exit with code 1 when they lose a dependency: `restart` brings them back.
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    env_file: .env
+    ports:
+      - '${PORT:-8080}:${PORT:-8080}'
+    depends_on:
+      mongo:
+        condition: service_healthy
+      rabbit:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'wget', '-qO', '/dev/null', 'http://127.0.0.1:${PORT:-8080}/healthz']
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    env_file: .env
+    depends_on:
+      mongo:
+        condition: service_healthy
+      rabbit:
+        condition: service_healthy
+    # Reaps the processes Chromium leaves behind.
+    init: true
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:7
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ['CMD', 'mongosh', '--quiet', '--eval', "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  rabbit:
+    image: rabbitmq:3-management
+    # Management UI on http://localhost:15672 (default credentials guest / guest).
+    ports:
+      - '15672:15672'
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', '-q', 'check_port_connectivity']
+      interval: 5s
+      timeout: 10s
+      retries: 12
+    restart: unless-stopped
+
+volumes:
+  mongo-data:

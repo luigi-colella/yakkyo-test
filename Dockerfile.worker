@@ -1,0 +1,39 @@
+# Same Node 20 line and libc (glibc) as the runtime image below.
+FROM node:20-bookworm-slim AS build
+WORKDIR /app
+RUN corepack enable
+# No dependency of the worker needs an install script: Chromium ships with the runtime image, and
+# this also skips the MongoDB binary download of mongodb-memory-server (a test-only dev dependency).
+ENV YARN_ENABLE_SCRIPTS=false
+
+# Every workspace manifest is needed for Yarn to resolve the lockfile.
+COPY package.json yarn.lock .yarnrc.yml tsconfig.base.json ./
+COPY shared/package.json shared/
+COPY api/package.json api/
+COPY worker/package.json worker/
+COPY web/package.json web/
+RUN yarn workspaces focus @crawler/shared @crawler/worker
+
+COPY shared/tsconfig.json shared/tsconfig.build.json shared/
+COPY shared/src shared/src
+COPY worker/tsconfig.json worker/tsconfig.build.json worker/
+COPY worker/src worker/src
+RUN yarn workspace @crawler/shared build \
+  && yarn workspace @crawler/worker build \
+  && yarn workspaces focus --production @crawler/worker
+
+# Chromium and its system dependencies, matching playwright@1.47.0 (pinned in worker/package.json).
+FROM mcr.microsoft.com/playwright:v1.47.0-jammy
+# The image ships Node 20.17, below the 20.19 required by Mongoose 9 and the MongoDB driver 7:
+# replace it with the build stage's Node 20 binary (same major, built for an older glibc).
+COPY --from=build /usr/local/bin/node /usr/bin/node
+WORKDIR /app
+COPY --from=build /app/node_modules node_modules
+COPY --from=build /app/shared/package.json shared/
+COPY --from=build /app/shared/dist shared/dist
+COPY --from=build /app/worker/package.json worker/
+COPY --from=build /app/worker/dist worker/dist
+
+USER pwuser
+WORKDIR /app/worker
+CMD ["node", "dist/index.js"]

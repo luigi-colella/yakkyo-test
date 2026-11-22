@@ -97,6 +97,7 @@ __metadata:
   dependencies:
     "@crawler/shared": "workspace:*"
     "@types/express": "npm:^5.0.6"
+    "@types/node": "npm:^20.19.43"
     "@types/supertest": "npm:^7.2.1"
     amqplib: "npm:^2.4.0"
     express: "npm:^5.3.0"
@@ -117,6 +118,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@crawler/shared@workspace:shared"
   dependencies:
+    "@types/node": "npm:^20.19.43"
     mongodb-memory-server: "npm:^11.4.0"
     mongoose: "npm:^9.12.3"
     typescript: "npm:~5.9.3"
@@ -152,6 +154,7 @@ __metadata:
   resolution: "@crawler/worker@workspace:worker"
   dependencies:
     "@crawler/shared": "workspace:*"
+    "@types/node": "npm:^20.19.43"
     amqplib: "npm:^2.4.0"
     ipaddr.js: "npm:^2.5.0"
     mongodb-memory-server: "npm:^11.4.0"

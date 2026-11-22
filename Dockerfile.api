@@ -1,0 +1,38 @@
+# The frontend is built on the host first: `yarn build-frontend` fills api/public.
+
+FROM node:20-alpine AS build
+WORKDIR /app
+RUN corepack enable
+# No dependency of the API needs an install script; this also skips the MongoDB binary download
+# of mongodb-memory-server (a test-only dev dependency).
+ENV YARN_ENABLE_SCRIPTS=false
+
+# Every workspace manifest is needed for Yarn to resolve the lockfile.
+COPY package.json yarn.lock .yarnrc.yml tsconfig.base.json ./
+COPY shared/package.json shared/
+COPY api/package.json api/
+COPY worker/package.json worker/
+COPY web/package.json web/
+RUN yarn workspaces focus @crawler/shared @crawler/api
+
+COPY shared/tsconfig.json shared/tsconfig.build.json shared/
+COPY shared/src shared/src
+COPY api/tsconfig.json api/tsconfig.build.json api/
+COPY api/src api/src
+RUN yarn workspace @crawler/shared build \
+  && yarn workspace @crawler/api build \
+  && yarn workspaces focus --production @crawler/api
+
+FROM node:20-alpine
+WORKDIR /app
+COPY --from=build /app/node_modules node_modules
+COPY --from=build /app/shared/package.json shared/
+COPY --from=build /app/shared/dist shared/dist
+COPY --from=build /app/api/package.json api/
+COPY --from=build /app/api/dist api/dist
+COPY api/public api/public
+
+USER node
+WORKDIR /app/api
+EXPOSE 8080
+CMD ["node", "dist/index.js"]

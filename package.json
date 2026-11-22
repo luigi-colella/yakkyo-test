@@ -20,6 +20,7 @@
     "lint": "eslint .",
     "setup:browser": "yarn workspace @crawler/worker playwright install chromium",
     "test": "vitest run --passWithNoTests",
+    "test:e2e": "yarn build-frontend && node scripts/e2e.mjs",
     "typecheck": "yarn workspaces foreach --all --parallel --topological run typecheck"
   },
   "devDependencies": {

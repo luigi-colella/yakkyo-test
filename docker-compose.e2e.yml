@@ -1,0 +1,34 @@
+# End-to-end override used by `yarn test:e2e` (scripts/e2e.mjs), on top of docker-compose.yml.
+# Hermetic: the services read .env.e2e-testing instead of the developer's .env (OpenAI mocked), and
+# host ports are ephemeral and bound to loopback (no clash with a running stack).
+# Needs Docker Compose >= 2.24.4 (!override).
+
+services:
+  api:
+    env_file: !override [.env.e2e-testing]
+    ports: !override
+      - '127.0.0.1::8080'
+
+  worker:
+    env_file: !override [.env.e2e-testing]
+    depends_on:
+      fixture:
+        condition: service_healthy
+
+  rabbit:
+    ports: !override
+      - '127.0.0.1::15672'
+
+  fixture:
+    build: e2e/fixture-site
+    # One server, two host names: robots.txt allows `fixture-site` and forbids `fixture-robots-denied`.
+    networks:
+      default:
+        aliases:
+          - fixture-site
+          - fixture-robots-denied
+    healthcheck:
+      test: ['CMD', 'wget', '-qO', '/dev/null', 'http://127.0.0.1:8081/healthz']
+      interval: 2s
+      timeout: 2s
+      retries: 15
