@@ -17,6 +17,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
+    "setup:browser": "yarn workspace @crawler/worker playwright install chromium",
     "test": "vitest run --passWithNoTests",
     "typecheck": "yarn workspaces foreach --all --parallel --topological run typecheck"
   },

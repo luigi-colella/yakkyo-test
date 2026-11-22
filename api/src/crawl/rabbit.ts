@@ -1,62 +1,29 @@
-import { assertQueueTopology, EXCHANGES, QUEUES } from '@crawler/shared';
-import type { CrawlMessage } from '@crawler/shared';
+import { assertQueueTopology, EXCHANGES, publishConfirmed, QUEUES } from '@crawler/shared';
+import type { ConfirmPublishChannel, CrawlMessage } from '@crawler/shared';
 import amqp from 'amqplib';
-import type { Options } from 'amqplib';
 
 export interface CrawlPublisher {
   /** Resolves once the broker has confirmed the message is stored. */
   publish(message: CrawlMessage): Promise<void>;
 }
 
-/** The subset of an amqplib confirm channel used to publish. */
-export interface ConfirmPublishChannel {
-  publish(
-    exchange: string,
-    routingKey: string,
-    content: Buffer,
-    options: Options.Publish,
-    callback: (error: unknown) => void,
-  ): boolean;
-}
-
-export const PUBLISH_CONFIRM_TIMEOUT_MS = 5_000;
-
 export class RabbitPublisher implements CrawlPublisher {
   constructor(
     private readonly channel: ConfirmPublishChannel,
-    private readonly confirmTimeoutMs = PUBLISH_CONFIRM_TIMEOUT_MS,
+    private readonly confirmTimeoutMs?: number,
   ) {}
 
   publish(message: CrawlMessage): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      // An unconfirmed message must not hang the HTTP request that published it.
-      const timer = setTimeout(
-        () => reject(new Error('RabbitMQ publish confirm timed out')),
-        this.confirmTimeoutMs,
-      );
-      const fail = (error: unknown, fallbackMessage: string) => {
-        clearTimeout(timer);
-        reject(error instanceof Error ? error : new Error(fallbackMessage));
-      };
-
-      try {
-        // amqplib calls back with `null` on ack and with an error on nack.
-        this.channel.publish(
-          EXCHANGES.crawl,
-          QUEUES.requests,
-          Buffer.from(JSON.stringify(message)),
-          { persistent: true, contentType: 'application/json', messageId: message.uid },
-          (error) => {
-            if (error) return fail(error, 'RabbitMQ rejected the message');
-            clearTimeout(timer);
-            resolve();
-          },
-        );
-      } catch (error: unknown) {
-        // Thrown synchronously, e.g. when the channel is already closed.
-        fail(error, 'RabbitMQ publish failed');
-      }
-    });
+    return publishConfirmed(
+      this.channel,
+      {
+        exchange: EXCHANGES.crawl,
+        routingKey: QUEUES.requests,
+        content: Buffer.from(JSON.stringify(message)),
+        options: { persistent: true, contentType: 'application/json', messageId: message.uid },
+      },
+      this.confirmTimeoutMs,
+    );
   }
 }
 

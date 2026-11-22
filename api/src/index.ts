@@ -1,7 +1,7 @@
 import type { Server } from 'node:http';
 import { fileURLToPath } from 'node:url';
 
-import { getPageModel } from '@crawler/shared';
+import { getPageModel, retryWithBackoff } from '@crawler/shared';
 import mongoose from 'mongoose';
 
 import { createApp } from './app.js';
@@ -12,7 +12,6 @@ import { createLogger } from './config/logger.js';
 import { MongoPageStore } from './crawl/page-store.js';
 import { connectRabbit } from './crawl/rabbit.js';
 import type { RabbitConnection } from './crawl/rabbit.js';
-import { retryWithBackoff } from './retry.js';
 
 const SHUTDOWN_TIMEOUT_MS = 10_000;
 
