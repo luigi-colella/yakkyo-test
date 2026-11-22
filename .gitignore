@@ -1,0 +1,18 @@
+# Local working notes (never committed)
+.tmp/
+
+# Dependencies and package manager state
+node_modules/
+.yarn/
+.pnp.*
+
+# Build output
+dist/
+coverage/
+api/public/
+*.tsbuildinfo
+
+# Environment and logs
+.env
+*.log
+.DS_Store
