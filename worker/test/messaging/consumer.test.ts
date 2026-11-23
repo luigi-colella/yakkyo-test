@@ -10,7 +10,7 @@ import type {
 } from '../../src/messaging/consumer.js';
 import { Deadline } from '../../src/pipeline/deadline.js';
 import { permanentFailure, transientFailure } from '../../src/pipeline/errors.js';
-import type { CrawlProcessor } from '../../src/pipeline/processor.js';
+import type { CrawlProcessor, ProcessResult } from '../../src/pipeline/processor.js';
 
 const NOW = new Date('2026-11-22T12:00:10.000Z');
 const JOB: CrawlMessage = {
@@ -39,7 +39,10 @@ function setup(overrides: Partial<CrawlConsumerOptions> = {}) {
     }),
   };
   const processor = {
-    process: vi.fn<CrawlProcessor['process']>().mockResolvedValue('done'),
+    process: vi.fn<CrawlProcessor['process']>().mockResolvedValue({
+      outcome: 'done',
+      networkIdle: true,
+    }),
   };
   const store = {
     isPending: vi.fn<(uid: string) => Promise<boolean>>().mockResolvedValue(true),
@@ -149,7 +152,7 @@ describe('CrawlConsumer', () => {
 
     it.each(['done', 'skipped'] as const)('acks a %s crawl', async (outcome) => {
       const context = setup();
-      context.processor.process.mockResolvedValue(outcome);
+      context.processor.process.mockResolvedValue({ outcome, networkIdle: true });
 
       await context.consumer.handle(delivery());
 
@@ -158,6 +161,21 @@ describe('CrawlConsumer', () => {
       expect(context.channel.publish).not.toHaveBeenCalled();
       expect(context.store.fail).not.toHaveBeenCalled();
     });
+
+    it.each([true, false])(
+      'logs whether the page reached networkidle (%s)',
+      async (networkIdle) => {
+        const context = setup();
+        context.processor.process.mockResolvedValue({ outcome: 'done', networkIdle });
+
+        await context.consumer.handle(delivery());
+
+        expect(context.logger.info).toHaveBeenCalledExactlyOnceWith(
+          { uid: JOB.uid, outcome: 'done', networkIdle, retries: 0 },
+          'crawl finished',
+        );
+      },
+    );
 
     it.each([0, 1])('retries a transient failure after %i retries', async (retries) => {
       const context = setup();
@@ -315,7 +333,7 @@ describe('CrawlConsumer', () => {
 
     it('waits for the messages being handled', async () => {
       const context = setup();
-      let finish: (outcome: 'done') => void = () => undefined;
+      let finish: (result: ProcessResult) => void = () => undefined;
       context.processor.process.mockReturnValue(
         new Promise((resolve) => {
           finish = resolve;
@@ -330,7 +348,7 @@ describe('CrawlConsumer', () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(idle).toBe(false);
 
-      finish('done');
+      finish({ outcome: 'done', networkIdle: true });
       await waiting;
       expect(context.channel.ack).toHaveBeenCalledOnce();
     });

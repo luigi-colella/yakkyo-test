@@ -28,7 +28,7 @@ let wrapper: VueWrapper;
 
 beforeEach(() => {
   vi.useFakeTimers();
-  vi.mocked(createCrawl).mockResolvedValue(UID);
+  vi.mocked(createCrawl).mockResolvedValue({ uid: UID });
   vi.mocked(getCrawlStatus).mockResolvedValue({ status: 'pending' });
   wrapper = mount(App);
 });
@@ -93,6 +93,29 @@ describe('App', () => {
     expect(description.find('strong').text()).toBe('columns');
     expect(wrapper.get('.meta').text()).toContain('4.3 s');
     expect(input().element.disabled).toBe(false);
+  });
+
+  it('shows a cache hit at once', async () => {
+    vi.mocked(createCrawl).mockResolvedValue({ uid: UID, cached: true });
+    vi.mocked(getCrawlStatus).mockResolvedValue(DONE);
+
+    await crawl('https://example.com');
+
+    expect(getCrawlStatus).toHaveBeenCalledOnce();
+    expect(wrapper.find('.loader').exists()).toBe(false);
+    expect(wrapper.get('.screenshot img').attributes('src')).toBe('data:image/jpeg;base64,/9j/');
+  });
+
+  it('waits for the first poll for a new job', async () => {
+    vi.mocked(getCrawlStatus).mockResolvedValue(DONE);
+
+    await crawl('https://example.com');
+
+    expect(getCrawlStatus).not.toHaveBeenCalled();
+    expect(wrapper.find('.loader').exists()).toBe(true);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(getCrawlStatus).toHaveBeenCalledOnce();
+    expect(wrapper.find('.screenshot').exists()).toBe(true);
   });
 
   it('shows a readable error and retries the same URL', async () => {

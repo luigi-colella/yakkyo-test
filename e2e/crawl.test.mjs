@@ -20,6 +20,7 @@ const FIXTURE = {
   plain: `${SITE}/`,
   redirect: `${SITE}/redirect`, // 301 to /spa
   spa: `${SITE}/spa`, // rendered on the client
+  busy: `${SITE}/busy`, // never network-idle
   auth: `${SITE}/auth`, // 401 basic auth
   robotsDenied: 'http://fixture-robots-denied:8081/', // same server, robots.txt forbids it
 };
@@ -27,6 +28,8 @@ const FIXTURE = {
 const CACHE_URL = `${FIXTURE.plain}?case=cache`;
 
 const CACHE_TTL_MS = 60_000;
+/** The worker waits this long for `networkidle` before settling for `domcontentloaded`. */
+const NETWORK_IDLE_TIMEOUT_MS = 10_000;
 
 describe('mini crawler end to end', () => {
   /** The job created by the idempotency step, reused by the cache steps. */
@@ -69,6 +72,10 @@ describe('mini crawler end to end', () => {
     const accepted = await Promise.all(
       [CACHE_URL, `${CACHE_URL}#a`, `${CACHE_URL}#b`].map((url) => requestCrawl(url)),
     );
+    assert.ok(
+      accepted.every((body) => body.cached === undefined),
+      'a running job is not a cache hit',
+    );
     const uids = accepted.map((body) => body.uid);
     assert.equal(new Set(uids).size, 1, `expected one uid, got ${uids.join(', ')}`);
     assert.deepEqual(await takePublishedUids(), [uids[0]], 'exactly one job should be published');
@@ -82,14 +89,29 @@ describe('mini crawler end to end', () => {
     assert.ok(firstJob, 'needs the job of the previous step');
     await takePublishedUids();
 
-    const { uid } = await requestCrawl(CACHE_URL);
+    const { uid, ...rest } = await requestCrawl(CACHE_URL);
     assert.equal(uid, firstJob.uid, 'a cache hit keeps the uid');
+    assert.deepEqual(rest, { cached: true }, 'a cache hit is flagged');
     assert.deepEqual(await takePublishedUids(), [], 'a cache hit publishes nothing');
 
     const status = await getStatus(uid);
     assert.equal(status.status, 'done', 'a cache hit is answered immediately');
     assert.equal(status.result.image, firstJob.result.image, 'no new screenshot');
     assert.equal(status.result.tookMs, firstJob.result.tookMs);
+  });
+
+  // Runs while the cache step below waits for the TTL, so it adds no time to the suite.
+  it('captures a page that never goes network-idle after the 10 s fallback', async () => {
+    const { uid } = await requestCrawl(FIXTURE.busy);
+    const status = await waitUntilSettled(uid);
+
+    assertDone(status, FIXTURE.busy);
+    // The queue is empty here, so the wait can only come from the networkidle fallback:
+    // the same page would otherwise be captured in a second or two.
+    assert.ok(
+      status.result.tookMs >= NETWORK_IDLE_TIMEOUT_MS,
+      `tookMs ${status.result.tookMs} should include the ${NETWORK_IDLE_TIMEOUT_MS} ms wait`,
+    );
   });
 
   it(
@@ -101,7 +123,9 @@ describe('mini crawler end to end', () => {
       await sleep(Math.max(0, firstJob.doneSeenAt + CACHE_TTL_MS + 1_000 - Date.now()));
       await takePublishedUids();
 
-      const { uid } = await requestCrawl(CACHE_URL);
+      const accepted = await requestCrawl(CACHE_URL);
+      assert.deepEqual(Object.keys(accepted), ['uid'], 'a cache miss is not flagged');
+      const { uid } = accepted;
       assert.notEqual(uid, firstJob.uid, 'a cache miss gets a new uid');
       assert.deepEqual(await takePublishedUids(), [uid], 'a cache miss publishes a new job');
       assertDone(await waitUntilSettled(uid), CACHE_URL);

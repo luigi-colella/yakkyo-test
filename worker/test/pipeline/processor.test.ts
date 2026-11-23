@@ -215,8 +215,8 @@ describe('CrawlProcessor with Chromium', () => {
       requestedAt: requestedAt.toISOString(),
     };
     try {
-      const outcome = await context.processor.process(message, deadline);
-      return { ...context, outcome };
+      const { outcome, networkIdle } = await context.processor.process(message, deadline);
+      return { ...context, outcome, networkIdle };
     } finally {
       deadline.dispose();
     }
@@ -232,9 +232,10 @@ describe('CrawlProcessor with Chromium', () => {
   }
 
   it('captures, analyzes and stores a page', async () => {
-    const { outcome, complete, stored } = await crawl(at('site.test'));
+    const { outcome, networkIdle, complete, stored } = await crawl(at('site.test'));
 
     expect(outcome).toBe('done');
+    expect(networkIdle).toBe(true);
     expect(complete).toHaveBeenCalledOnce();
     const [record] = stored;
     expect(record?.image.subarray(0, 2)).toEqual(Buffer.from([0xff, 0xd8])); // JPEG
@@ -341,11 +342,21 @@ describe('CrawlProcessor with Chromium', () => {
 
   it('falls back to domcontentloaded when the network never goes idle', async () => {
     const startedAt = Date.now();
-    const { outcome } = await crawl(at('site.test', '/busy'), { networkIdleTimeoutMs: 1_500 });
+    const { outcome, networkIdle } = await crawl(at('site.test', '/busy'), {
+      networkIdleTimeoutMs: 1_500,
+    });
 
     expect(outcome).toBe('done');
+    expect(networkIdle).toBe(false);
     expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1_400);
     expect(requests.filter((r) => r.path === '/ping').length).toBeGreaterThan(3);
+  }, 30_000);
+
+  it('does not wait for networkidle once navigation has used the idle budget', async () => {
+    const { outcome, networkIdle } = await crawl(at('site.test'), { networkIdleTimeoutMs: 0 });
+
+    expect(outcome).toBe('done');
+    expect(networkIdle).toBe(false);
   }, 30_000);
 
   it('fails with page_timeout when the budget is already spent', async () => {

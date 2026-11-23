@@ -68,7 +68,7 @@ describe('CrawlService.requestCrawl', () => {
   it('creates and publishes a new job keyed by the normalized URL', async () => {
     const { pages, publisher, service } = setup();
 
-    await expect(service.requestCrawl(URL_INPUT)).resolves.toBe('uid-1');
+    await expect(service.requestCrawl(URL_INPUT)).resolves.toEqual({ uid: 'uid-1' });
     expect(pages.findCachedDone).toHaveBeenCalledWith(URL_KEY, expect.any(Date));
     expect(pages.expireStalePending).toHaveBeenCalledWith(URL_KEY, expect.any(Date));
     expect(pages.findPending).toHaveBeenCalledWith(URL_KEY);
@@ -85,7 +85,10 @@ describe('CrawlService.requestCrawl', () => {
       findCachedDone: vi.fn().mockResolvedValue('done-uid'),
     });
 
-    await expect(service.requestCrawl(URL_INPUT)).resolves.toBe('done-uid');
+    await expect(service.requestCrawl(URL_INPUT)).resolves.toEqual({
+      uid: 'done-uid',
+      cached: true,
+    });
     expect(pages.findCachedDone).toHaveBeenCalledWith(
       URL_KEY,
       new Date(NOW.getTime() - DONE_CACHE_TTL_MS),
@@ -114,7 +117,7 @@ describe('CrawlService.requestCrawl', () => {
       findPending: vi.fn().mockResolvedValue('pending-uid'),
     });
 
-    await expect(service.requestCrawl(URL_INPUT)).resolves.toBe('pending-uid');
+    await expect(service.requestCrawl(URL_INPUT)).resolves.toEqual({ uid: 'pending-uid' });
     expect(pages.insertPending).not.toHaveBeenCalled();
     expect(publisher.publish).not.toHaveBeenCalled();
   });
@@ -125,7 +128,7 @@ describe('CrawlService.requestCrawl', () => {
       insertPending: vi.fn().mockResolvedValue(false),
     });
 
-    await expect(service.requestCrawl(URL_INPUT)).resolves.toBe('winner-uid');
+    await expect(service.requestCrawl(URL_INPUT)).resolves.toEqual({ uid: 'winner-uid' });
     expect(pages.insertPending).toHaveBeenCalledTimes(1);
     expect(publisher.publish).not.toHaveBeenCalled();
   });
@@ -135,7 +138,7 @@ describe('CrawlService.requestCrawl', () => {
       insertPending: vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true),
     });
 
-    await expect(service.requestCrawl(URL_INPUT)).resolves.toBe('uid-2');
+    await expect(service.requestCrawl(URL_INPUT)).resolves.toEqual({ uid: 'uid-2' });
     expect(pages.insertPending).toHaveBeenNthCalledWith(2, 'uid-2', URL_KEY, NOW);
     expect(publisher.publish).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ uid: 'uid-2' }),

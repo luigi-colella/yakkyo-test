@@ -4,4 +4,4 @@
 **/coverage/
 api/public/
 yarn.lock
-SPEC.md
+docs/spec.md

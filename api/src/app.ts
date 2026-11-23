@@ -85,8 +85,7 @@ export function createApp({
       res.status(400).json({ error: 'invalid_url' });
       return;
     }
-    const uid = await crawlService.requestCrawl(body.data.url);
-    res.status(202).json({ uid });
+    res.status(202).json(await crawlService.requestCrawl(body.data.url));
   });
 
   app.get('/crawl/:uid', async (req, res) => {

@@ -1,5 +1,5 @@
 import { normalizeUrl } from '@crawler/shared';
-import type { CrawlStatusResponse } from '@crawler/shared';
+import type { CrawlAccepted, CrawlStatusResponse } from '@crawler/shared';
 import { ulid } from 'ulid';
 
 import { ServiceUnavailableError } from './errors.js';
@@ -22,8 +22,11 @@ export interface CrawlServiceDeps {
 
 interface Job {
   uid: string;
-  /** `true` only for a job created by this request, which must then be published. */
-  created: boolean;
+  /**
+   * `cache`: completed less than 60 s ago; `running`: pending, created by another request;
+   * `created`: created by this request, which must then publish it.
+   */
+  source: 'cache' | 'running' | 'created';
 }
 
 export class CrawlService {
@@ -40,17 +43,18 @@ export class CrawlService {
   }
 
   /**
-   * Returns the uid of the job answering a crawl request for `input`:
-   * a recently completed job (cache), a running one (idempotency) or a new
-   * one, published to the queue. Throws `UrlValidationError` for an invalid
-   * URL and `ServiceUnavailableError` when MongoDB or RabbitMQ fail.
+   * Returns the job answering a crawl request for `input`: a recently completed
+   * job (cache, flagged `cached`), a running one (idempotency) or a new one,
+   * published to the queue. Throws `UrlValidationError` for an invalid URL and
+   * `ServiceUnavailableError` when MongoDB or RabbitMQ fail.
    */
-  async requestCrawl(input: string): Promise<string> {
+  async requestCrawl(input: string): Promise<CrawlAccepted> {
     const url = normalizeUrl(input);
     const requestedAt = this.now();
 
     const job = await withStorage(() => this.findOrCreateJob(url, requestedAt));
-    if (!job.created) return job.uid;
+    if (job.source === 'cache') return { uid: job.uid, cached: true };
+    if (job.source === 'running') return { uid: job.uid };
 
     try {
       await this.publisher.publish({ uid: job.uid, url, requestedAt: requestedAt.toISOString() });
@@ -59,7 +63,7 @@ export class CrawlService {
       await this.pages.markError(job.uid, 'queue_unavailable').catch(() => undefined);
       throw new ServiceUnavailableError('queue_unavailable', { cause: error });
     }
-    return job.uid;
+    return { uid: job.uid };
   }
 
   getStatus(uid: string): Promise<CrawlStatusResponse | null> {
@@ -70,7 +74,7 @@ export class CrawlService {
     const now = requestedAt.getTime();
 
     const cachedUid = await this.pages.findCachedDone(url, new Date(now - DONE_CACHE_TTL_MS));
-    if (cachedUid) return { uid: cachedUid, created: false };
+    if (cachedUid) return { uid: cachedUid, source: 'cache' };
 
     await this.pages.expireStalePending(url, new Date(now - PENDING_REUSE_WINDOW_MS));
 
@@ -78,10 +82,10 @@ export class CrawlService {
     // means a concurrent request created it, and the next lookup returns it.
     for (let attempt = 1; attempt <= MAX_INSERT_ATTEMPTS; attempt++) {
       const pendingUid = await this.pages.findPending(url);
-      if (pendingUid) return { uid: pendingUid, created: false };
+      if (pendingUid) return { uid: pendingUid, source: 'running' };
 
       const uid = this.createUid();
-      if (await this.pages.insertPending(uid, url, requestedAt)) return { uid, created: true };
+      if (await this.pages.insertPending(uid, url, requestedAt)) return { uid, source: 'created' };
     }
     throw new Error(`Could not settle a pending job for ${url}`);
   }

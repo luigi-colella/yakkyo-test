@@ -1,4 +1,4 @@
-import type { CrawlStatusResponse } from '@crawler/shared/contracts';
+import type { CrawlAccepted, CrawlStatusResponse } from '@crawler/shared/contracts';
 
 /**
  * A failed API call. `code` is the API's stable error code, or one of the frontend's own:
@@ -20,7 +20,7 @@ export class ApiError extends Error {
   }
 }
 
-export async function createCrawl(url: string, signal: AbortSignal): Promise<string> {
+export async function createCrawl(url: string, signal: AbortSignal): Promise<CrawlAccepted> {
   const { status, body } = await request('/crawl', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -31,7 +31,7 @@ export async function createCrawl(url: string, signal: AbortSignal): Promise<str
   if (!isRecord(body) || typeof body.uid !== 'string') {
     throw new ApiError('invalid_response', status);
   }
-  return body.uid;
+  return body.cached === true ? { uid: body.uid, cached: true } : { uid: body.uid };
 }
 
 export async function getCrawlStatus(

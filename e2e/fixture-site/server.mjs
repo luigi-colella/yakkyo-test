@@ -23,12 +23,20 @@ const SPA_BODY = `<main class="card" id="app">Loading…</main>
     });
 </script>`;
 
+// Keeps the network busy forever, so the crawler never sees `networkidle`.
+const BUSY_BODY = `<main class="card"><h1>A page that never stops polling</h1></main>
+<script>
+  setInterval(() => fetch('/busy/ping'), 200);
+</script>`;
+
 /** Static responses by path, each with the e2e scenario it serves. */
 const ROUTES = {
   '/': html('Fixture page', STATIC_BODY), // plain page
   '/redirect': { status: 301, headers: { Location: '/spa' } }, // redirect to the SPA
   '/spa': html('SPA fixture', SPA_BODY), // where the redirect lands
   '/spa/data.json': json({ title: 'Rendered on the client' }), // fetched by the SPA
+  '/busy': html('Busy fixture', BUSY_BODY), // never network-idle
+  '/busy/ping': { status: 204 }, // polled by the busy page
   '/auth': { status: 401, headers: { 'WWW-Authenticate': 'Basic realm="fixture"' } }, // basic auth
   '/healthz': text(200, 'ok'), // Compose healthcheck
 };

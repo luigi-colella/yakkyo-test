@@ -18,8 +18,14 @@ export const crawlMessageSchema = z.strictObject({
 });
 export type CrawlMessage = z.infer<typeof crawlMessageSchema>;
 
+/** `POST /crawl` 202 body. */
 export interface CrawlAccepted {
   uid: string;
+  /**
+   * Only on a cache hit: the job is already `done`, so the client can read it at once
+   * instead of waiting for its first poll. Absent for a new or running job.
+   */
+  cached?: true;
 }
 
 export interface CrawlResult {

@@ -35,7 +35,7 @@ afterEach(() => vi.useRealTimers());
 
 function fakeCrawlService() {
   return {
-    requestCrawl: vi.fn<CrawlServiceType['requestCrawl']>().mockResolvedValue(UID),
+    requestCrawl: vi.fn<CrawlServiceType['requestCrawl']>().mockResolvedValue({ uid: UID }),
     getStatus: vi.fn<CrawlServiceType['getStatus']>().mockResolvedValue(null),
   };
 }
@@ -67,6 +67,16 @@ describe('POST /crawl', () => {
     expect(res.status).toBe(202);
     expect(res.body).toEqual({ uid: UID });
     expect(crawlService.requestCrawl).toHaveBeenCalledWith('https://example.com/#top');
+  });
+
+  it('flags a cache hit with cached: true', async () => {
+    const { app, crawlService } = setup();
+    crawlService.requestCrawl.mockResolvedValue({ uid: UID, cached: true });
+
+    const res = await request(app).post('/crawl').send({ url: 'https://example.com/' });
+
+    expect(res.status).toBe(202);
+    expect(res.body).toEqual({ uid: UID, cached: true });
   });
 
   it.each([

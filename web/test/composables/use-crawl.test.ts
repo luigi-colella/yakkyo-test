@@ -1,4 +1,4 @@
-import type { CrawlResult } from '@crawler/shared/contracts';
+import type { CrawlAccepted, CrawlResult } from '@crawler/shared/contracts';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ApiError } from '../../src/services/api.js';
@@ -27,7 +27,7 @@ function deferred<T>() {
 
 function fakes(overrides: Partial<CrawlDeps> = {}) {
   return {
-    createCrawl: vi.fn<CrawlDeps['createCrawl']>().mockResolvedValue(UID),
+    createCrawl: vi.fn<CrawlDeps['createCrawl']>().mockResolvedValue({ uid: UID }),
     getCrawlStatus: vi.fn<CrawlDeps['getCrawlStatus']>().mockResolvedValue({ status: 'pending' }),
     pollUntilSettled: vi
       .fn<CrawlDeps['pollUntilSettled']>()
@@ -46,7 +46,7 @@ describe('useCrawl', () => {
   });
 
   it('goes through submitting and polling to success', async () => {
-    const created = deferred<string>();
+    const created = deferred<CrawlAccepted>();
     const polled = deferred<SettledStatus>();
     const { view, busy, submit } = useCrawl(
       fakes({
@@ -59,7 +59,7 @@ describe('useCrawl', () => {
     expect(view.value).toEqual({ name: 'submitting' });
     expect(busy.value).toBe(true);
 
-    created.resolve(UID);
+    created.resolve({ uid: UID });
     await vi.waitFor(() => expect(view.value).toEqual({ name: 'polling' }));
     expect(busy.value).toBe(true);
 
@@ -76,13 +76,26 @@ describe('useCrawl', () => {
     await submit('https://example.com');
 
     expect(deps.createCrawl).toHaveBeenCalledWith('https://example.com', expect.any(AbortSignal));
-    const [check, signal, startedAt] = vi.mocked(deps.pollUntilSettled).mock.calls[0]!;
+    const [check, signal, startedAt, options] = vi.mocked(deps.pollUntilSettled).mock.calls[0]!;
     expect(startedAt).toBe(42);
     expect(signal).toBe(vi.mocked(deps.createCrawl).mock.calls[0]![1]);
+    expect(options).toEqual({ checkAtOnce: false });
 
     const checkSignal = new AbortController().signal;
     await check(checkSignal);
     expect(deps.getCrawlStatus).toHaveBeenCalledWith(UID, checkSignal);
+  });
+
+  it('checks a cache hit at once', async () => {
+    const deps = fakes({
+      createCrawl: vi.fn<CrawlDeps['createCrawl']>().mockResolvedValue({ uid: UID, cached: true }),
+    });
+    const { submit } = useCrawl(deps);
+
+    await submit('https://example.com');
+
+    const [, , , options] = vi.mocked(deps.pollUntilSettled).mock.calls[0]!;
+    expect(options).toEqual({ checkAtOnce: true });
   });
 
   it('shows the readable message of a failed crawl', async () => {

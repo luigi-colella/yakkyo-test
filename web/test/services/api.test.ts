@@ -41,7 +41,7 @@ describe('createCrawl', () => {
     reply(202, { uid: UID });
     const abort = signal();
 
-    await expect(createCrawl('https://example.com', abort)).resolves.toBe(UID);
+    await expect(createCrawl('https://example.com', abort)).resolves.toEqual({ uid: UID });
 
     const [path, init] = fetchMock.mock.calls[0]!;
     expect(path).toBe('/crawl');
@@ -52,6 +52,21 @@ describe('createCrawl', () => {
       Accept: 'application/json',
     });
     expect(init?.signal).toBe(abort);
+  });
+
+  it('passes on the cache-hit flag', async () => {
+    reply(202, { uid: UID, cached: true });
+
+    await expect(createCrawl('https://example.com', signal())).resolves.toEqual({
+      uid: UID,
+      cached: true,
+    });
+  });
+
+  it.each([false, 'yes', 1])('ignores a cached flag that is not true (%s)', async (cached) => {
+    reply(202, { uid: UID, cached });
+
+    await expect(createCrawl('https://example.com', signal())).resolves.toEqual({ uid: UID });
   });
 
   it.each([

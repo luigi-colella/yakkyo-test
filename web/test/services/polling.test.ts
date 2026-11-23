@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiError } from '../../src/services/api.js';
 import {
+  type PollOptions,
   pollUntilSettled,
   PollTimeoutError,
   type StatusCheck,
@@ -55,8 +56,9 @@ function start(
   check: StatusCheck,
   signal = new AbortController().signal,
   startedAt = 0,
+  options: PollOptions = {},
 ): Promise<Outcome> {
-  return pollUntilSettled(check, signal, startedAt).then(
+  return pollUntilSettled(check, signal, startedAt, options).then(
     (status) => ({ status }),
     (error: unknown) => ({ error }),
   );
@@ -80,6 +82,42 @@ describe('pollUntilSettled', () => {
     const error = await errorOf(outcome);
     expect(error).toBeInstanceOf(PollTimeoutError);
     expect((error as PollTimeoutError).code).toBe('poll_timeout');
+  });
+
+  describe('with checkAtOnce (cache hit)', () => {
+    it('checks right away and returns a settled status without waiting', async () => {
+      const { check, times } = checkAnswering(answer(DONE));
+      const outcome = start(check, undefined, 0, { checkAtOnce: true });
+
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(times).toEqual([0]);
+      expect(await outcome).toEqual({ status: DONE });
+    });
+
+    it('falls back to the usual schedule when the first check does not settle', async () => {
+      const { check, times } = checkAnswering(
+        fail(new ApiError('network_error')),
+        answer(PENDING),
+        answer(DONE),
+      );
+      const outcome = start(check, undefined, 0, { checkAtOnce: true });
+
+      await vi.advanceTimersByTimeAsync(4_000);
+
+      expect(times).toEqual([0, 2_000, 4_000]);
+      expect(await outcome).toEqual({ status: DONE });
+    });
+
+    it('keeps the 30 s timeout', async () => {
+      const { check, times } = checkAnswering();
+      const outcome = start(check, undefined, 0, { checkAtOnce: true });
+
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      expect(times).toEqual([0, 2_000, 4_000, 8_000, 16_000, 27_000]);
+      expect(await errorOf(outcome)).toBeInstanceOf(PollTimeoutError);
+    });
   });
 
   it('measures the offsets from startedAt, not from the call', async () => {

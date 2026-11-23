@@ -23,7 +23,18 @@ export const NETWORK_IDLE_TIMEOUT_MS = 10_000;
 const CLEANUP_TIMEOUT_MS = 5_000;
 const JPEG_QUALITY = 50;
 
-export type ProcessOutcome = 'done' | 'skipped';
+export interface ProcessResult {
+  /** `skipped` when the job was finalized elsewhere while it was being crawled. */
+  outcome: 'done' | 'skipped';
+  /** Whether the page reached `networkidle`; `false` means it settled for `domcontentloaded`. */
+  networkIdle: boolean;
+}
+
+interface Navigation {
+  /** HTTP status of the final document, if any. */
+  status: number | undefined;
+  networkIdle: boolean;
+}
 
 export interface CrawlProcessorOptions {
   browser: Pick<Browser, 'newContext'>;
@@ -59,8 +70,7 @@ export class CrawlProcessor {
     this.now = options.now ?? Date.now;
   }
 
-  /** Resolves `skipped` when the job was finalized elsewhere while it was being crawled. */
-  async process(message: CrawlMessage, deadline: Deadline): Promise<ProcessOutcome> {
+  async process(message: CrawlMessage, deadline: Deadline): Promise<ProcessResult> {
     try {
       return await this.crawl(message, deadline);
     } catch (error: unknown) {
@@ -68,7 +78,10 @@ export class CrawlProcessor {
     }
   }
 
-  private async crawl({ uid, url, requestedAt }: CrawlMessage, deadline: Deadline) {
+  private async crawl(
+    { uid, url, requestedAt }: CrawlMessage,
+    deadline: Deadline,
+  ): Promise<ProcessResult> {
     const job = new CrawlJob(this.guard, deadline);
     // Refuse early, before a browser context is even created.
     await job.assertNavigationAllowed(url);
@@ -89,9 +102,9 @@ export class CrawlProcessor {
       await deadline.run(context.route('**/*', (route) => job.screen(route)));
       const page = await deadline.run(context.newPage());
 
-      let status: number | undefined;
+      let navigation: Navigation;
       try {
-        status = await this.navigate(page, url, deadline);
+        navigation = await this.navigate(page, url, deadline);
       } catch (error: unknown) {
         throw explainNavigationError(error, job.navigationFailure, proxy.failure);
       }
@@ -101,7 +114,7 @@ export class CrawlProcessor {
       // because a refused plain-HTTP hop reaches Chromium as the proxy's 403.
       const finalUrl = page.url();
       await job.assertNavigationAllowed(finalUrl);
-      const statusFailure = httpStatusFailure(status);
+      const statusFailure = httpStatusFailure(navigation.status);
       if (statusFailure) throw statusFailure;
 
       const image = await page.screenshot({
@@ -128,7 +141,7 @@ export class CrawlProcessor {
           },
         }),
       );
-      return stored ? 'done' : 'skipped';
+      return { outcome: stored ? 'done' : 'skipped', networkIdle: navigation.networkIdle };
     } finally {
       if (context) await settleWithin(context.close(), CLEANUP_TIMEOUT_MS);
       await settleWithin(proxy.stop(), CLEANUP_TIMEOUT_MS);
@@ -138,23 +151,24 @@ export class CrawlProcessor {
   /**
    * Waits for `networkidle` for at most `networkIdleTimeoutMs` from the start of the
    * navigation, then settles for `domcontentloaded` (pages that never stop polling).
-   * Returns the HTTP status of the final document, if any.
    */
-  private async navigate(page: Page, url: string, deadline: Deadline): Promise<number | undefined> {
+  private async navigate(page: Page, url: string, deadline: Deadline): Promise<Navigation> {
     const startedAt = Date.now();
     const response = await page.goto(url, {
       waitUntil: 'domcontentloaded',
       timeout: deadline.remaining(),
     });
     const idleBudgetMs = this.networkIdleTimeoutMs - (Date.now() - startedAt);
+    let networkIdle = false;
     if (idleBudgetMs > 0) {
       try {
         await page.waitForLoadState('networkidle', { timeout: deadline.cap(idleBudgetMs) });
+        networkIdle = true;
       } catch (error: unknown) {
         if (!(error instanceof Error && error.name === 'TimeoutError')) throw error;
       }
     }
-    return response?.status();
+    return { status: response?.status(), networkIdle };
   }
 }
 

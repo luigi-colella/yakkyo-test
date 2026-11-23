@@ -46,12 +46,14 @@ export function useCrawl(deps: CrawlDeps = defaultDeps) {
     view.value = { name: 'submitting' };
 
     try {
-      const uid = await deps.createCrawl(url, current.signal);
+      const { uid, cached } = await deps.createCrawl(url, current.signal);
       view.value = { name: 'polling' };
       const status = await deps.pollUntilSettled(
         (signal) => deps.getCrawlStatus(uid, signal),
         current.signal,
         startedAt,
+        // A cache hit is already done: show it now rather than at the first poll.
+        { checkAtOnce: cached === true },
       );
       if (current.signal.aborted) return;
       view.value =

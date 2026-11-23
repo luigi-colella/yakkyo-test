@@ -287,41 +287,43 @@ describe('CrawlService with MongoDB', () => {
   });
 
   it('creates a single job for three concurrent requests', async () => {
-    const uids = await Promise.all([
+    const accepted = await Promise.all([
       service.requestCrawl(URL_KEY),
       service.requestCrawl(URL_KEY),
       service.requestCrawl(URL_KEY),
     ]);
 
-    expect(new Set(uids).size).toBe(1);
+    expect(new Set(accepted.map(({ uid }) => uid)).size).toBe(1);
+    expect(accepted.some((job) => job.cached)).toBe(false);
     await expect(Pages.countDocuments({ url: URL_KEY })).resolves.toBe(1);
     expect(publisher.publish).toHaveBeenCalledTimes(1);
   });
 
   it('serves a completed job from cache for 60 seconds after completion', async () => {
-    const uid = await service.requestCrawl(URL_KEY);
+    const { uid } = await service.requestCrawl(URL_KEY);
     await Pages.updateOne(
       { uid },
       { $set: { status: 'done', completedAt: new Date(NOW.getTime() + 20_000) } },
     );
 
     now = new Date(NOW.getTime() + 79_000);
-    await expect(service.requestCrawl(URL_KEY)).resolves.toBe(uid);
+    await expect(service.requestCrawl(URL_KEY)).resolves.toEqual({ uid, cached: true });
 
     now = new Date(NOW.getTime() + 80_000);
     const fresh = await service.requestCrawl(URL_KEY);
-    expect(fresh).not.toBe(uid);
+    expect(fresh.uid).not.toBe(uid);
+    expect(fresh.cached).toBeUndefined();
     expect(publisher.publish).toHaveBeenCalledTimes(2);
   });
 
   it('replaces a pending job older than 5 minutes', async () => {
-    const stuck = await service.requestCrawl(URL_KEY);
+    const { uid: stuck } = await service.requestCrawl(URL_KEY);
 
     now = new Date(NOW.getTime() + PENDING_REUSE_WINDOW_MS - 1);
-    await expect(service.requestCrawl(URL_KEY)).resolves.toBe(stuck);
+    await expect(service.requestCrawl(URL_KEY)).resolves.toEqual({ uid: stuck });
 
     now = new Date(NOW.getTime() + PENDING_REUSE_WINDOW_MS);
-    const replacement = await service.requestCrawl(URL_KEY);
+    const { uid: replacement } = await service.requestCrawl(URL_KEY);
     expect(replacement).not.toBe(stuck);
     await expect(service.getStatus(stuck)).resolves.toEqual({
       status: 'error',
@@ -335,7 +337,7 @@ describe('CrawlService with MongoDB', () => {
     const failed = await service.requestCrawl(URL_KEY).catch(() => null);
     expect(failed).toBeNull();
 
-    const retried = await service.requestCrawl(URL_KEY);
+    const { uid: retried } = await service.requestCrawl(URL_KEY);
     await expect(service.getStatus(retried)).resolves.toEqual({ status: 'pending' });
     await expect(
       Pages.countDocuments({ status: 'error', errorMessage: 'queue_unavailable' }),

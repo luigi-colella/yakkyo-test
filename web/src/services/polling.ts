@@ -15,6 +15,14 @@ export const CHECK_TIMEOUT_MS = 3_000;
 export type SettledStatus = Exclude<CrawlStatusResponse, { status: 'pending' }>;
 export type StatusCheck = (signal: AbortSignal) => Promise<CrawlStatusResponse>;
 
+export interface PollOptions {
+  /**
+   * Check once right away, before the schedule: for a job already known to be settled
+   * (a cache hit), so its result shows without waiting for the 2 s offset.
+   */
+  checkAtOnce?: boolean;
+}
+
 export class PollTimeoutError extends Error {
   readonly code = 'poll_timeout';
 
@@ -34,10 +42,12 @@ export async function pollUntilSettled(
   check: StatusCheck,
   signal: AbortSignal,
   startedAt: number = Date.now(),
+  { checkAtOnce = false }: PollOptions = {},
 ): Promise<SettledStatus> {
   const deadline = startedAt + POLL_TIMEOUT_MS;
+  const offsets = checkAtOnce ? [0, ...POLL_OFFSETS_MS] : POLL_OFFSETS_MS;
 
-  for (const offset of POLL_OFFSETS_MS) {
+  for (const offset of offsets) {
     await sleepUntil(startedAt + offset, signal);
     const status = await checkOnce(check, signal, deadline);
     if (status && status.status !== 'pending') return status;

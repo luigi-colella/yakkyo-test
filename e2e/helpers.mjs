@@ -22,7 +22,7 @@ export async function assertApiHealthy() {
   assert.equal(health.status, 200, 'the API should report healthy dependencies');
 }
 
-/** `POST /crawl`: the 202 body (`{ uid }`). */
+/** `POST /crawl`: the 202 body (`{ uid }`, plus `cached: true` on a cache hit). */
 export async function requestCrawl(url) {
   const response = await fetch(`${API_URL}/crawl`, {
     method: 'POST',

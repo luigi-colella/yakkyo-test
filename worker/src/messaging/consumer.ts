@@ -113,8 +113,9 @@ export class CrawlConsumer {
     }
 
     const failure = await this.processor.process(job, deadline).then(
-      (outcome) => {
-        this.logger.info({ uid, outcome, retries }, 'crawl finished');
+      ({ outcome, networkIdle }) => {
+        // `networkIdle: false` means the capture fell back to `domcontentloaded`.
+        this.logger.info({ uid, outcome, networkIdle, retries }, 'crawl finished');
         return undefined;
       },
       (error: unknown) => toCrawlFailure(error),
